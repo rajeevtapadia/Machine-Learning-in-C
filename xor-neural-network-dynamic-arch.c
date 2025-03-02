@@ -32,7 +32,7 @@ int main() {
     // NN_PRINT(nn);
     printf("err: %f\n", nn_rms_error(nn, ti, to));
     for (int i = 0; i < 100*100; i++) {
-        nn_train(nn, diff, eps, ti, to);
+        nn_finite_diff(nn, diff, eps, ti, to);
         nn_apply_diff(nn, diff, rate);
     }
     printf("err: %f\n", nn_rms_error(nn, ti, to));

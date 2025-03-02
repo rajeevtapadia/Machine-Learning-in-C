@@ -40,7 +40,7 @@ void nn_rand(NN nn, float low, float high);
 void nn_print(NN nn, char *name);
 void nn_forward(NN nn);
 float nn_rms_error(NN nn, Matrix ti, Matrix to);
-void nn_train(NN nn, NN diff, float eps, Matrix ti, Matrix to);
+void nn_finite_diff(NN nn, NN diff, float eps, Matrix ti, Matrix to);
 void nn_apply_diff(NN nn, NN diff, float rate);
 
 #endif
@@ -236,7 +236,7 @@ float nn_rms_error(NN nn, Matrix ti, Matrix to) {
     return error / row_count;
 }
 
-void nn_train(NN nn, NN diff, float eps, Matrix ti, Matrix to) {
+void nn_finite_diff(NN nn, NN diff, float eps, Matrix ti, Matrix to) {
     float saved;
     float init_cost = nn_rms_error(nn, ti, to);
     for (size_t i = 0; i < nn.layer_count; i++) {
