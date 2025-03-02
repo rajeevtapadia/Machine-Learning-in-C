@@ -7,8 +7,8 @@
 float xor_df[] = {0, 0, 0, 1, 0, 1, 0, 1, 1, 1, 1, 0};
 
 void print_predictions(NN nn) {
-    for(int i = 0; i < 2; i++) {
-        for(int j = 0; j < 2; j++) {
+    for (int i = 0; i < 2; i++) {
+        for (int j = 0; j < 2; j++) {
             nn.as[0].es[0] = i;
             nn.as[0].es[1] = j;
             nn_forward(nn);
@@ -31,9 +31,14 @@ int main() {
     float eps = 1e-1, rate = 1;
     // NN_PRINT(nn);
     printf("err: %f\n", nn_rms_error(nn, ti, to));
-    for (int i = 0; i < 100*100; i++) {
+    for (int i = 0; i < 100 * 100; i++) {
+#if 1 // switch between finite diff and backprop
         nn_finite_diff(nn, diff, eps, ti, to);
         nn_apply_diff(nn, diff, rate);
+#else
+        nn_backprop(nn, diff, ti, to);
+        nn_apply_diff_backprop(nn, diff, rate);
+#endif
     }
     printf("err: %f\n", nn_rms_error(nn, ti, to));
     print_predictions(nn);

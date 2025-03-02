@@ -37,11 +37,14 @@ typedef struct {
 
 NN nn_alloc(size_t *layer_arch, size_t layer_count);
 void nn_rand(NN nn, float low, float high);
+void nn_fill(NN nn, float num);
 void nn_print(NN nn, char *name);
 void nn_forward(NN nn);
 float nn_rms_error(NN nn, Matrix ti, Matrix to);
 void nn_finite_diff(NN nn, NN diff, float eps, Matrix ti, Matrix to);
+void nn_backprop(NN nn, NN diff, Matrix ti, Matrix to);
 void nn_apply_diff(NN nn, NN diff, float rate);
+void nn_apply_diff_backprop(NN nn, NN diff, float rate);
 
 #endif
 
@@ -69,7 +72,8 @@ float get_rand() { return (float)rand() / RAND_MAX; }
 float sigmoidf(float x) { return 1.f / (1.f + expf(-x)); }
 
 void mat_rand(Matrix mat, float low, float high) {
-    srand(time(0));
+    // srand(time(0));
+    srand(69);
     for (size_t i = 0; i < mat.rows; i++) {
         for (size_t j = 0; j < mat.cols; j++) {
             MAT_AT(mat, i, j) = get_rand() * (high - low) + low;
@@ -193,6 +197,15 @@ void nn_rand(NN nn, float low, float high) {
     }
 }
 
+void nn_fill(NN nn, float num) {
+    for(size_t i = 0; i < nn.layer_count; i++) {
+        mat_fill(nn.as[i], num);
+        mat_fill(nn.bs[i], num);
+        mat_fill(nn.ws[i], num);
+    }
+    mat_fill(nn.as[nn.layer_count], num);
+}
+
 void nn_print(NN nn, char *name) {
     char buff[256];
     printf("%s: [\n", name);
@@ -263,6 +276,79 @@ void nn_finite_diff(NN nn, NN diff, float eps, Matrix ti, Matrix to) {
         }
     }
 }
+void nn_backprop(NN nn, NN diff, Matrix ti, Matrix to) {
+    assert(ti.rows == to.rows);
+    assert(NN_OUTPUT(nn).cols == to.cols);
+    assert(nn.layer_count == diff.layer_count);
+    size_t n = ti.rows;
+    
+    nn_fill(diff, 0);
+
+    /*
+     * interation variable and their meaning
+     * i - current sample in dataset
+     * l - current layer
+     * j - current activations / col of weight matrix
+     * k - prev activation / row of weight matrix
+     */
+
+    // loop to iterate over all input data samples
+    for (size_t i = 0; i < n; i++) {
+        // load data in input layer
+        mat_copy(NN_INPUT(nn), mat_get_row(ti, i));
+        nn_forward(nn);
+        
+        // clean up diff.as matrix 
+        for(size_t j = 0; j <= nn.layer_count; j++) {
+            mat_fill(diff.as[j], 0);
+        }
+
+        // store the difference between output and expected value
+        // in activation matrix of diff
+        for (size_t j = 0; j < to.cols; j++) {
+            MAT_AT(NN_OUTPUT(diff), 0, j) = MAT_AT(NN_OUTPUT(nn), 0, j) - MAT_AT(to, i, j);
+        }
+
+        // loop over layers
+        for (size_t l = nn.layer_count; l > 0; l--) {
+            // loop over activations of l th layer
+            for (size_t j = 0; j < nn.as[l].cols; j++) {
+                float a = MAT_AT(nn.as[l], 0, j);
+                float da = MAT_AT(diff.as[l], 0, j); // da is derivative of cost of next layer
+                MAT_AT(diff.bs[l - 1], 0, j) += 2 * da * a * (1 - a);
+
+                // loop over previous activation matrix (vector as no of rows are 1)
+                for (size_t k = 0; k < nn.as[l - 1].cols; k++) {
+                    float pa = MAT_AT(nn.as[l - 1], 0, k);
+                    float w = MAT_AT(nn.ws[l - 1], k, j);
+                    MAT_AT(diff.ws[l - 1], k, j) += 2 * da * a * (1 - a) * pa;
+                    MAT_AT(diff.as[l - 1], 0, k) += 2 * da * a * (1 - a) * w;
+                }
+            }
+        }
+    }
+    // iterate over all values and divide by N
+    for (size_t i = 0; i < diff.layer_count; i++) {
+        // for weights
+        for (size_t j = 0; j < diff.ws[i].rows; j++) {
+            for (size_t k = 0; k < diff.ws[i].cols; k++) {
+                MAT_AT(diff.ws[i], j, k) /= n;
+            }
+        }
+        // for bias
+        for (size_t j = 0; j < diff.bs[i].rows; j++) {
+            for (size_t k = 0; k < diff.bs[i].cols; k++) {
+                MAT_AT(diff.bs[i], j, k) /= n;
+            }
+        }
+        // for activations
+        for (size_t j = 0; j < diff.as[i].rows; j++) {
+            for (size_t k = 0; k < diff.as[i].cols; k++) {
+                MAT_AT(diff.as[i], j, k) /= n;
+            }
+        }
+    }
+}
 
 void nn_apply_diff(NN nn, NN diff, float rate) {
     for (size_t i = 0; i < nn.layer_count; i++) {
@@ -277,6 +363,24 @@ void nn_apply_diff(NN nn, NN diff, float rate) {
         for (size_t j = 0; j < nn.bs[i].rows; j++) {
             for (size_t k = 0; k < nn.bs[i].cols; k++) {
                 MAT_AT(nn.bs[i], j, k) += rate * MAT_AT(diff.bs[i], j, k);
+            }
+        }
+    }
+}
+
+void nn_apply_diff_backprop(NN nn, NN diff, float rate) {
+    for (size_t i = 0; i < nn.layer_count; i++) {
+        // for weights
+        for (size_t j = 0; j < nn.ws[i].rows; j++) {
+            for (size_t k = 0; k < nn.ws[i].cols; k++) {
+                MAT_AT(nn.ws[i], j, k) -= rate * MAT_AT(diff.ws[i], j, k);
+            }
+        }
+
+        // for bias
+        for (size_t j = 0; j < nn.bs[i].rows; j++) {
+            for (size_t k = 0; k < nn.bs[i].cols; k++) {
+                MAT_AT(nn.bs[i], j, k) -= rate * MAT_AT(diff.bs[i], j, k);
             }
         }
     }
